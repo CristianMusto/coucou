@@ -24,9 +24,10 @@ struct MediaKeyPress: Equatable, Sendable {
     let isRepeat: Bool
 }
 
-/// What the HUD controls.
+/// What the HUD shows: the three levels the keys move, and the battery when the charger
+/// is plugged in or out (no key: BatteryWatcher).
 enum SystemHUDTarget: String, Sendable {
-    case volume, display, keyboard
+    case volume, display, keyboard, battery
 }
 
 /// What a key press asks for.
@@ -120,6 +121,23 @@ enum SystemHUDLogic {
         if value <= 0.3 { return .low }
         if value >= 0.7 { return .high }
         return .normal
+    }
+}
+
+extension SystemHUDLogic {
+    /// At or under this, the battery shows in red on battery power (macOS warns at 20 % too).
+    static let lowBatteryPercent = 20
+
+    /// What a new power reading means for the card: +1 the charger was just plugged in,
+    /// -1 just unplugged, nil nothing to show (the first reading only sets the baseline, and
+    /// the charge moving by a percent fires the same notification without any plug change).
+    static func chargerChange(was: Bool?, now: Bool) -> Int? {
+        guard let was, was != now else { return nil }
+        return now ? 1 : -1
+    }
+
+    static func isLowBattery(percent: Int, onPower: Bool) -> Bool {
+        !onPower && percent <= lowBatteryPercent
     }
 }
 

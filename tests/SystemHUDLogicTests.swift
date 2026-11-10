@@ -20,6 +20,8 @@ enum SystemHUDLogicTests {
         testPercent()
         testMood()
         testSoundRate()
+        testChargerChange()
+        testLowBattery()
         print("SystemHUDLogic: all cases passed")
     }
 
@@ -173,5 +175,23 @@ enum SystemHUDLogicTests {
         precondition(approx(SystemHUDLogic.soundRate(level: .nan), 0.8))
         precondition(SystemHUDLogic.soundRate(level: 0.25) < SystemHUDLogic.soundRate(level: 0.75),
                      "higher volume, higher pitch")
+    }
+
+    static func testChargerChange() {
+        // The first reading is only the baseline: no card at launch.
+        precondition(SystemHUDLogic.chargerChange(was: nil, now: true) == nil)
+        precondition(SystemHUDLogic.chargerChange(was: nil, now: false) == nil)
+        precondition(SystemHUDLogic.chargerChange(was: false, now: true) == 1, "plugged in")
+        precondition(SystemHUDLogic.chargerChange(was: true, now: false) == -1, "unplugged")
+        // The charge moving a percent fires the same notification: nothing to show.
+        precondition(SystemHUDLogic.chargerChange(was: true, now: true) == nil)
+        precondition(SystemHUDLogic.chargerChange(was: false, now: false) == nil)
+    }
+
+    static func testLowBattery() {
+        precondition(SystemHUDLogic.isLowBattery(percent: 20, onPower: false))
+        precondition(SystemHUDLogic.isLowBattery(percent: 5, onPower: false))
+        precondition(!SystemHUDLogic.isLowBattery(percent: 21, onPower: false))
+        precondition(!SystemHUDLogic.isLowBattery(percent: 5, onPower: true), "charging is never red")
     }
 }

@@ -197,7 +197,8 @@ final class MachineVitals: ObservableObject {
     }
 
     /// The internal battery: its charge and whether the Mac is plugged in. Nil on a desktop Mac.
-    private static func readBattery() -> (percent: Int, onPower: Bool)? {
+    /// Also read by BatteryWatcher (the charging card).
+    static func readBattery() -> (percent: Int, onPower: Bool)? {
         guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let list = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() else { return nil }
         for source in list as Array {

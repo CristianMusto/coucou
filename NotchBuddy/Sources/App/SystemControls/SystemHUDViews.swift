@@ -76,16 +76,20 @@ struct SystemLevelCard: View {
         .animation(Self.spring, value: model.level)
         .animation(.easeInOut(duration: 0.25), value: model.muted)
         .animation(.easeInOut(duration: 0.25), value: model.target)
+        .animation(.easeInOut(duration: 0.25), value: model.onPower)
     }
 
-    private var title: String { Self.title(for: model.target) }
+    private var title: String { Self.title(for: model.target, onPower: model.onPower) }
     private var value: String { Self.value(level: model.level, muted: model.muted, target: model.target) }
 
-    static func title(for target: SystemHUDTarget) -> String {
+    static func title(for target: SystemHUDTarget, onPower: Bool = false) -> String {
         switch target {
         case .volume:   return String(localized: "system-hud.line.volume")
         case .display:  return String(localized: "system-hud.line.display")
         case .keyboard: return String(localized: "system-hud.line.keyboard")
+        case .battery:
+            return onPower ? String(localized: "system-hud.line.charging")
+                           : String(localized: "system-hud.line.battery")
         }
     }
 
@@ -96,26 +100,27 @@ struct SystemLevelCard: View {
     }
 
     /// The key's colour (bright tone of the card's palette).
-    static func color(for target: SystemHUDTarget) -> Color {
-        switch target {
-        case .volume:   return Color(hex: "#3B9EFF")
-        case .display:  return Color(hex: "#F5A524")
-        case .keyboard: return Color(hex: "#A78BFA")
+    static func color(for model: SystemHUDModel) -> Color { palette(for: model).bright }
+
+    /// One colour per kind of key (the vitals line's palette), grey when muted. The battery
+    /// is green, red when low on battery power (SystemHUDLogic.isLowBattery).
+    static func palette(for model: SystemHUDModel) -> (deep: Color, bright: Color, glow: Color) {
+        switch model.target {
+        case .volume where model.muted:
+            return (Color(hex: "#4B5058"), Color(hex: "#8E939C"), Color(hex: "#B5B9C0"))
+        case .volume:   return (Color(hex: "#1F6FD1"), Color(hex: "#3B9EFF"), Color(hex: "#8CC4FF"))
+        case .display:  return (Color(hex: "#D98A12"), Color(hex: "#F5A524"), Color(hex: "#FCD34D"))
+        case .keyboard: return (Color(hex: "#7C5CFF"), Color(hex: "#A78BFA"), Color(hex: "#C4B5FD"))
+        case .battery:
+            let percent = SystemHUDLogic.percent(level: model.level, muted: false)
+            if SystemHUDLogic.isLowBattery(percent: percent, onPower: model.onPower) {
+                return (Color(hex: "#C9302C"), Color(hex: "#FF453A"), Color(hex: "#FCA5A5"))
+            }
+            return (Color(hex: "#1F9D45"), Color(hex: "#30D158"), Color(hex: "#86EFAC"))
         }
     }
 
-    /// One colour per kind of key (the vitals line's palette), grey when muted.
-    private var palette: (deep: Color, bright: Color, glow: Color) {
-        if model.target == .volume && model.muted {
-            return (Color(hex: "#4B5058"), Color(hex: "#8E939C"), Color(hex: "#B5B9C0"))
-        }
-        let bright = Self.color(for: model.target)
-        switch model.target {
-        case .volume:   return (Color(hex: "#1F6FD1"), bright, Color(hex: "#8CC4FF"))
-        case .display:  return (Color(hex: "#D98A12"), bright, Color(hex: "#FCD34D"))
-        case .keyboard: return (Color(hex: "#7C5CFF"), bright, Color(hex: "#C4B5FD"))
-        }
-    }
+    private var palette: (deep: Color, bright: Color, glow: Color) { Self.palette(for: model) }
 }
 
 /// In the island's header, when a volume or brightness key is pressed while the island is
@@ -135,7 +140,7 @@ struct SystemLevelHeaderPill: View {
         ZStack {
             if model.lineVisible {
                 let muted = model.target == .volume && model.muted
-                let color = muted ? Color(hex: "#8E939C") : SystemLevelCard.color(for: model.target)
+                let color = SystemLevelCard.color(for: model)
                 let level = CGFloat(muted ? 0 : min(max(model.level, 0), 1))
                 HStack(spacing: 5) {
                     Image(systemName: symbol(muted: muted))
@@ -166,7 +171,7 @@ struct SystemLevelHeaderPill: View {
                 .background(Capsule().fill(color.opacity(0.18)))
                 .overlay(Capsule().stroke(color.opacity(0.55), lineWidth: 1))
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(SystemLevelCard.title(for: model.target) + " "
+                .accessibilityLabel(SystemLevelCard.title(for: model.target, onPower: model.onPower) + " "
                                     + SystemLevelCard.value(level: model.level, muted: model.muted,
                                                             target: model.target))
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
@@ -177,12 +182,22 @@ struct SystemLevelHeaderPill: View {
         .allowsHitTesting(false)
     }
 
-    /// The key's icon: the header's own speaker for the volume, the sun, the keyboard light.
+    /// The key's icon: the header's own speaker for the volume, the sun, the keyboard light,
+    /// the battery (with a bolt while charging).
     private func symbol(muted: Bool) -> String {
         switch model.target {
         case .volume:   return muted ? "speaker.slash.fill" : "speaker.wave.2.fill"
         case .display:  return "sun.max.fill"
         case .keyboard: return "light.max"
+        case .battery:
+            if model.onPower { return "battery.100percent.bolt" }
+            switch model.level {
+            case ..<0.13: return "battery.0percent"
+            case ..<0.38: return "battery.25percent"
+            case ..<0.63: return "battery.50percent"
+            case ..<0.88: return "battery.75percent"
+            default:      return "battery.100percent"
+            }
         }
     }
 }
@@ -196,6 +211,8 @@ struct SystemHUDSettingsSection: View {
     @State private var soundChoice = SystemHUDSound.choice
     @State private var display = SystemHUDController.isEnabled(.display)
     @State private var keyboard = SystemHUDController.isEnabled(.keyboard)
+    @State private var charging = SystemHUDController.isEnabled(.battery)
+    private let hasBattery = BatteryWatcher.hasBattery
 
     var body: some View {
         Group {
@@ -251,6 +268,25 @@ struct SystemHUDSettingsSection: View {
                 .disabled(!on)
             }
                 .settingsAnchor("systemhud.keys")
+
+            // Not a key, and no Accessibility needed: works with the switch above off too.
+            if hasBattery {
+                GroupBox(String(localized: "system-hud.charging-group")) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle(String(localized: "system-hud.charging"), isOn: $charging)
+                            .onChange(of: charging) { _, v in
+                                SystemHUDController.setEnabled(v, for: .battery)
+                                BatteryWatcher.shared.update()
+                            }
+                        Text(String(localized: "system-hud.charging.footer"))
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(6)
+                }
+                    .settingsAnchor("systemhud.charging")
+            }
         }
         // While the page shows and Accessibility is missing, notice the moment it is given.
         .task(id: on) {

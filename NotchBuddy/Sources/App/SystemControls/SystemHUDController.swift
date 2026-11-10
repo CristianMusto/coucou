@@ -8,6 +8,8 @@ final class SystemHUDModel: ObservableObject {
     @Published var target: SystemHUDTarget = .volume
     @Published var level: Double = 0
     @Published var muted = false
+    /// The battery card: plugged in (charging) or on battery.
+    @Published var onPower = false
     /// The header pill: shown instead of the card while the island is open on one of the
     /// few views a switch would break (an upload, the voice, the chat…).
     @Published var lineVisible = false
@@ -33,9 +35,10 @@ final class SystemHUDController {
 
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
 
-    /// Each kind of key can be left to macOS on its own (all on by default).
+    /// Each kind of key can be left to macOS on its own (all on by default). The charging
+    /// card is off by default: it is new behaviour, not a key Coucou takes over.
     static func isEnabled(_ target: SystemHUDTarget) -> Bool {
-        UserDefaults.standard.object(forKey: "systemHUD.\(target.rawValue)") as? Bool ?? true
+        UserDefaults.standard.object(forKey: "systemHUD.\(target.rawValue)") as? Bool ?? (target != .battery)
     }
 
     static func setEnabled(_ on: Bool, for target: SystemHUDTarget) {
@@ -67,8 +70,10 @@ final class SystemHUDController {
 
     private init() {}
 
-    /// At launch: starts the tap if the setting is on. Never prompts.
+    /// At launch: starts the tap if the setting is on. Never prompts. The charging card has
+    /// its own switch and needs no Accessibility, so it starts either way.
     func startIfEnabled() {
+        BatteryWatcher.shared.update()
         guard Self.isEnabled else { return }
         start(prompt: false)
     }
@@ -154,6 +159,9 @@ final class SystemHUDController {
             let next = SystemHUDLogic.stepped(level, direction: direction, fine: fine)
             guard keyboard.setLevel(next) else { return false }
             show(.keyboard, level: next, muted: false, direction: direction)
+
+        case .step(.battery, _, _):
+            return false   // no key moves the battery
         }
         return true
     }
@@ -164,6 +172,13 @@ final class SystemHUDController {
         let level = device.flatMap { SystemVolume.volume(of: $0) } ?? 0.5
         let muted = device.flatMap { SystemVolume.isMuted($0) } ?? false
         show(.volume, level: level, muted: muted, direction: 1)
+    }
+
+    /// The charger was plugged in (+1) or out (-1): the card shows the charge (BatteryWatcher).
+    func showBattery(percent: Int, onPower: Bool, direction: Int) {
+        guard island != nil, Self.isEnabled(.battery) else { return }
+        model.onPower = onPower
+        show(.battery, level: Double(percent) / 100, muted: false, direction: direction)
     }
 
     // MARK: - The level card
